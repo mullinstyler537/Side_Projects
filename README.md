@@ -1,6 +1,6 @@
 # Satellite Remote Sensing & Wildfire Analytics Portfolio
 
-This repository contains three interconnected data science projects built in R. Together, they show how to use satellite data to measure the environmental damage caused by a major wildfire (The Cameron Peak Fire in Colorado).
+This repository contains three interconnected data science projects built in R.
 
 ---
 
