@@ -1,0 +1,143 @@
+---
+title: "Transcriptomic Analysis of Breast Cancer (Basal vs Normal)"
+format: html
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+```{r}
+library(GEOquery)
+library(tidyverse)
+library(limma)
+library(EnhancedVolcano)
+library(pheatmap)
+library(patchwork)
+library(clusterProfiler)
+library(org.Hs.eg.db)
+library(enrichplot)
+library(grid)
+
+gse <- getGEO("GSE45827", GSEMatrix = TRUE)
+breast <- gse[[1]]
+expr <- exprs(breast)
+metadata <- pData(breast)
+genes <- fData(breast)
+
+group <- ifelse(grepl("^Basal", metadata$title), "Basal",
+         ifelse(grepl("^Normal", metadata$title), "Normal", NA))
+
+keep <- !is.na(group)
+
+expr2 <- expr[, keep]
+group2 <- factor(group[keep])
+
+expr_t <- t(expr2)
+
+pca <- prcomp(expr_t, scale. = TRUE)
+
+pca_df <- data.frame(
+  PC1 = pca$x[,1],
+  PC2 = pca$x[,2],
+  Group = group2
+)
+
+pca_plot <- ggplot(pca_df, aes(PC1, PC2, color = Group)) +
+  geom_point(size = 3) +
+  theme_classic() +
+  scale_color_manual(values = c(Basal = "#C0392B", Normal = "#2980B9")) +
+  labs(title = "PCA")
+
+design <- model.matrix(~0 + group2)
+colnames(design) <- levels(group2)
+
+fit <- lmFit(expr2, design)
+
+contrast.matrix <- makeContrasts(Basal - Normal, levels = design)
+
+fit2 <- contrasts.fit(fit, contrast.matrix)
+fit2 <- eBayes(fit2)
+
+results <- topTable(fit2, number = Inf, adjust.method = "BH")
+
+volcano_plot <- EnhancedVolcano(
+  results,
+  lab = rownames(results),
+  x = "logFC",
+  y = "adj.P.Val",
+  pCutoff = 0.05,
+  FCcutoff = 1,
+  title = "Volcano Plot"
+)
+
+top50 <- head(results[order(results$adj.P.Val), ], 50)
+topGenes <- rownames(top50)
+
+heatmap_data <- expr2[topGenes, ]
+heatmap_scaled <- t(scale(t(heatmap_data)))
+
+annotation <- data.frame(Group = group2)
+rownames(annotation) <- colnames(heatmap_scaled)
+
+ann_colors <- list(
+  Group = c(Basal = "#C0392B", Normal = "#2980B9")
+)
+
+heatmap_plot <- pheatmap(
+  heatmap_scaled,
+  annotation_col = annotation,
+  annotation_colors = ann_colors,
+  show_rownames = FALSE,
+  silent = TRUE
+)
+
+heatmap_panel <- wrap_elements(full = heatmap_plot$gtable)
+
+gene_annot <- genes[, c("ID", "Gene Symbol", "ENTREZ_GENE_ID")]
+colnames(gene_annot) <- c("ProbeID", "Symbol", "ENTREZID")
+
+results$ProbeID <- rownames(results)
+
+results_annotated <- merge(results, gene_annot, by = "ProbeID")
+
+sig_entrez <- unique(results_annotated$ENTREZID[
+  results_annotated$adj.P.Val < 0.05 &
+  abs(results_annotated$logFC) > 1
+])
+
+sig_entrez <- as.character(sig_entrez)
+
+ego <- enrichGO(
+  gene = sig_entrez,
+  OrgDb = org.Hs.eg.db,
+  keyType = "ENTREZID",
+  ont = "BP",
+  readable = TRUE
+)
+
+go_plot <- dotplot(ego, showCategory = 10) +
+  ggtitle("GO Enrichment")
+
+go_panel <- wrap_elements(full = ggplotGrob(go_plot))
+
+final_figure <- (pca_plot | volcano_plot) /
+                (heatmap_panel | go_panel)
+
+final_figure
+
+ggsave("Figure1.pdf", final_figure, width = 14, height = 10)
+ggsave("Figure1.png", final_figure, width = 14, height = 10, dpi = 600)
+
+
+---
+
+# ▶️ How to run it
+
+1. Open RStudio  
+2. File → New File → Quarto Document  
+3. Paste everything above  
+4. Save as:
+
+```text
+BreastCancer_GEO.qmd
